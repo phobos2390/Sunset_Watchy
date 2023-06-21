@@ -21,7 +21,6 @@ class Sunset_watchface : public Watchy
     using Watchy::Watchy;
     public:
         virtual void drawWatchFace();
-        virtual void handleButtonPositions();
         void initPositions();
 };
 
