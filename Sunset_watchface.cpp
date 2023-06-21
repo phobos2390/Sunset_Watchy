@@ -143,26 +143,15 @@ void Sunset_watchface::drawWatchFace()
 
 
     // reset step counter at midnight
-    uint32_t stepCount = sensor.getCounter();
     if (currentTime.Hour == 0 && currentTime.Minute == 0)
     {
-      sensor.resetStepCounter();
-      Steps_History[Current_Day] = stepCount;
-      Current_Day = (Current_Day + 1) % DAYS_STEP_HISTORY;
-      if(Current_Day == 0)
-      {
-        Days_For_Average = DAYS_STEP_HISTORY;
-      }
-      else
-      {
-        Days_For_Average++;
-      }
+      step_counter.Next_Day();
     }
     display.drawBitmap(STEP_GLYPH_POS_X, STEP_GLYPH_POS_Y, epd_bitmap_StepSymbol, IND_GLYPH_WIDTH, IND_GLYPH_HEIGHT, GxEPD_WHITE);
     display.setCursor(STEP_GLYPH_POS_X + IND_GLYPH_WIDTH + 5, STEP_GLYPH_POS_Y + 10);
-    display.print(stepCount);
+    display.print(step_counter.Get_Step_Count());
     display.print(" ");
-    display.print(Average_Steps(&Steps_History[0], Days_For_Average));
+    display.print(step_counter.Get_Average_Step_Count());
 }
 
 void Sunset_watchface::initPositions()
@@ -172,10 +161,6 @@ void Sunset_watchface::initPositions()
     m_hour_positions[i].x = -sin((i*TAU)/POSITION_DENSITY) * DISPLAY_WIDTH/2.35  + DISPLAY_WIDTH/2  - ROTATIONAL_WATCHFACE_OFFSET_X;
     m_hour_positions[i].y =  cos((i*TAU)/POSITION_DENSITY) * DISPLAY_HEIGHT/2.35 + DISPLAY_HEIGHT/2 - ROTATIONAL_WATCHFACE_OFFSET_Y;
   }
-  memset(&Steps_History[0], 0, sizeof(Steps_History));
-  Current_Day = 0;
-  Days_For_Average = 1;
 }
 
-}
 //*/
