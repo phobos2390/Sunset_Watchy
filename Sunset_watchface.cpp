@@ -1,5 +1,13 @@
 #include "Sunset_watchface.h"
 
+RTC_DATA_ATTR ScreenPosition m_hour_positions [POSITION_DENSITY];
+RTC_DATA_ATTR uint16_t Steps_History [DAYS_STEP_HISTORY];
+RTC_DATA_ATTR uint8_t Current_Day;
+RTC_DATA_ATTR uint8_t Days_For_Average;
+RTC_DATA_ATTR uint64_t Initialized_Value;
+
+#define INIT_VALUE 0xF1ABDEF021036552
+
 #define MID_OFFSET 40
 #define LINE_HEIGHT 16
 #define ROTATIONAL_WATCHFACE_OFFSET_X 10
@@ -70,6 +78,11 @@ const unsigned char epd_bitmap_Sunrise_Sunset_Pin [] PROGMEM = {
 };
 
 
+// 'Battery0', 12x10px
+const unsigned char epd_bitmap_Battery0 [] PROGMEM = {
+  0x00, 0x00, 0x00, 0x00, 0xff, 0xe0, 0xe0, 0x10, 0xe0, 0x10, 0xe0, 0x10, 0xe0, 0x10, 0xff, 0xe0, 
+  0x00, 0x00, 0x00, 0x00
+};
 // 'Battery1', 12x10px
 const unsigned char epd_bitmap_Battery1 [] PROGMEM = {
   0x00, 0x00, 0x00, 0x00, 0xff, 0xe0, 0xe0, 0x10, 0xe0, 0x10, 0xe0, 0x10, 0xe0, 0x10, 0xff, 0xe0, 
@@ -78,11 +91,6 @@ const unsigned char epd_bitmap_Battery1 [] PROGMEM = {
 // 'Battery2', 12x10px
 const unsigned char epd_bitmap_Battery2 [] PROGMEM = {
   0x00, 0x00, 0x00, 0x00, 0xff, 0xe0, 0xf0, 0x10, 0xf0, 0x10, 0xf0, 0x10, 0xf0, 0x10, 0xff, 0xe0, 
-  0x00, 0x00, 0x00, 0x00
-};
-// 'Battery0', 12x10px
-const unsigned char epd_bitmap_Battery0 [] PROGMEM = {
-  0x00, 0x00, 0x00, 0x00, 0xff, 0xe0, 0xc0, 0x10, 0xc0, 0x10, 0xc0, 0x10, 0xc0, 0x10, 0xff, 0xe0, 
   0x00, 0x00, 0x00, 0x00
 };
 // 'Battery3', 12x10px
@@ -122,6 +130,7 @@ const unsigned char epd_bitmap_Battery9 [] PROGMEM = {
 };
 
 const unsigned char* epd_bitmap_battery_val [] PROGMEM = {
+  epd_bitmap_Battery0,
   epd_bitmap_Battery1,
   epd_bitmap_Battery2,
   epd_bitmap_Battery3,
@@ -168,6 +177,10 @@ struct sun_times
 };
 
 const sun_times month_sun [] = {
+  { // 0th month
+    .sunrise_hour = 0,
+    .sunset_hour = 0
+  },
   { // January
     .sunrise_hour = 7,
     .sunset_hour = 5 + 12
@@ -212,6 +225,8 @@ const sun_times month_sun [] = {
     .sunrise_hour = 7,
     .sunset_hour = 6 + 12
   },
+  \
+  
   { // December
     .sunrise_hour = 7,
     .sunset_hour = 5 + 12
@@ -224,7 +239,6 @@ enum DisplayType
   Sunset_Sunrise,
   Day
 };
-
 
 DisplayType displaySun(uint8_t hour, uint8_t month)
 {
@@ -248,6 +262,26 @@ uint16_t Average_Steps(uint16_t* steps_per_day, size_t number_of_days)
     total += steps_per_day[i];
   }
   return (uint16_t)total/number_of_days;
+}
+
+void Sunset_watchface::drawBigNumber(uint16_t number)
+{
+  if(number > 10000)
+  {
+    display.print(number / 1000);
+    display.print("K");
+  }
+  else if(number > 1000)
+  {
+    display.print(number / 1000);
+    display.print(".");
+    display.print((number % 1000) / 100);
+    display.print("K");
+  }
+  else
+  {
+    display.print(number);
+  }
 }
 
 void Sunset_watchface::drawWatchFace()
@@ -348,7 +382,18 @@ void Sunset_watchface::drawWatchFace()
   }
   display.drawBitmap(BLUETOOTH_GLYPH_POS_X, BLUETOOTH_GLYPH_POS_Y, bluetooth_symbol, IND_GLYPH_WIDTH, IND_GLYPH_HEIGHT, GxEPD_WHITE);
 
-  uint8_t voltPerdec = (uint8_t)(((getBatteryVoltage() - BATTERY_VOLT_MIN) / (BATTERY_VOLT_MAX - BATTERY_VOLT_MIN)) * 10);
+  const size_t batteryGlyphSymbolCount = (sizeof(epd_bitmap_battery_val) / sizeof(epd_bitmap_battery_val[0]));
+  float voltage = getBatteryVoltage();
+  uint8_t voltPerdec = batteryGlyphSymbolCount - 1;
+  if((BATTERY_VOLT_MIN < voltage) && (voltage < BATTERY_VOLT_MAX))
+  {
+    voltPerdec = (uint8_t)(((voltage - BATTERY_VOLT_MIN) / (BATTERY_VOLT_MAX - BATTERY_VOLT_MIN)) * batteryGlyphSymbolCount);
+  }
+  else if(BATTERY_VOLT_MIN >= voltage)
+  {
+    voltPerdec = 0;
+  }
+  voltPerdec = voltPerdec % batteryGlyphSymbolCount;
   display.drawBitmap(BATTERY_GLYPH_POS_X, 
                      BATTERY_GLYPH_POS_Y, 
                      epd_bitmap_battery_val[voltPerdec], 
@@ -356,38 +401,82 @@ void Sunset_watchface::drawWatchFace()
                      BATTERY_GLYPH_SIZE_HEIGHT, 
                      GxEPD_WHITE);
 
-
-    // reset step counter at midnight
-    uint32_t stepCount = sensor.getCounter();
-    if (currentTime.Hour == 0 && currentTime.Minute == 0)
+  // reset step counter at midnight
+  uint32_t stepCount = sensor.getCounter();
+  if (currentTime.Hour == 0 && currentTime.Minute == 0)
+  {
+    sensor.resetStepCounter();
+    Steps_History[Current_Day] = stepCount;
+    Current_Day = (Current_Day + 1) % DAYS_STEP_HISTORY;
+    if(Current_Day == 0)
     {
-      sensor.resetStepCounter();
-      Steps_History[Current_Day] = stepCount;
-      Current_Day = (Current_Day + 1) % DAYS_STEP_HISTORY;
-      if(Current_Day == 0)
-      {
-        Days_For_Average = DAYS_STEP_HISTORY;
-      }
-      else
-      {
-        Days_For_Average++;
-      }
+      Days_For_Average = DAYS_STEP_HISTORY;
     }
-    display.drawBitmap(STEP_GLYPH_POS_X, STEP_GLYPH_POS_Y, epd_bitmap_StepSymbol, IND_GLYPH_WIDTH, IND_GLYPH_HEIGHT, GxEPD_WHITE);
-    display.setCursor(STEP_GLYPH_POS_X + IND_GLYPH_WIDTH + 5, STEP_GLYPH_POS_Y + 10);
-    display.print(stepCount);
-    display.print(" ");
-    display.print(Average_Steps(&Steps_History[0], Days_For_Average));
+    else
+    {
+      Days_For_Average++;
+    }
+  }
+
+  uint32_t averageCount = 0;
+  if(Days_For_Average == DAYS_STEP_HISTORY)
+  {
+    averageCount = Average_Steps(&Steps_History[0], Days_For_Average);
+  }
+  else if(Days_For_Average > 1)
+  {
+    averageCount = Average_Steps(&Steps_History[0], Current_Day);
+  }
+  else
+  {
+    averageCount = 0;
+  }
+
+  uint8_t diffPosX = 0;
+  if(averageCount > 10000)
+  {
+    diffPosX += 5;
+  }
+  else if(averageCount > 1000)
+  {
+    diffPosX += 10;
+  }
+
+  if(stepCount > 10000)
+  {
+    diffPosX += 5;
+  }
+  else if(stepCount > 1000)
+  {
+    diffPosX += 10;
+  }
+
+  display.drawBitmap(STEP_GLYPH_POS_X - diffPosX, 
+                     STEP_GLYPH_POS_Y, 
+                     epd_bitmap_StepSymbol, 
+                     IND_GLYPH_WIDTH, 
+                     IND_GLYPH_HEIGHT, 
+                     GxEPD_WHITE);
+  display.setCursor(STEP_GLYPH_POS_X - diffPosX + IND_GLYPH_WIDTH + 5, 
+                    STEP_GLYPH_POS_Y + 10);
+
+  drawBigNumber(stepCount);
+  display.print(" ");
+  drawBigNumber(averageCount);
 }
 
 void Sunset_watchface::initPositions()
 {
-  for(uint32_t i = 0; i < POSITION_DENSITY; i++)
+  if(Initialized_Value != INIT_VALUE)
   {
-    m_hour_positions[i].x = -sin((i*TAU)/POSITION_DENSITY) * DISPLAY_WIDTH/2.35  + DISPLAY_WIDTH/2  - ROTATIONAL_WATCHFACE_OFFSET_X;
-    m_hour_positions[i].y =  cos((i*TAU)/POSITION_DENSITY) * DISPLAY_HEIGHT/2.35 + DISPLAY_HEIGHT/2 - ROTATIONAL_WATCHFACE_OFFSET_Y;
+    Initialized_Value = INIT_VALUE;
+    for(uint32_t i = 0; i < POSITION_DENSITY; i++)
+    {
+      m_hour_positions[i].x = -sin((i*TAU)/POSITION_DENSITY) * DISPLAY_WIDTH/2.35  + DISPLAY_WIDTH/2  - ROTATIONAL_WATCHFACE_OFFSET_X;
+      m_hour_positions[i].y =  cos((i*TAU)/POSITION_DENSITY) * DISPLAY_HEIGHT/2.35 + DISPLAY_HEIGHT/2 - ROTATIONAL_WATCHFACE_OFFSET_Y;
+    }
+    memset(&Steps_History[0], 0, sizeof(Steps_History));
+    Current_Day = 0;
+    Days_For_Average = 1;
   }
-  memset(&Steps_History[0], 0, sizeof(Steps_History));
-  Current_Day = 0;
-  Days_For_Average = 1;
 }

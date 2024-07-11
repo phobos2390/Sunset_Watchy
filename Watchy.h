@@ -68,6 +68,8 @@ public:
   bool syncNTP(long gmt, String ntpServer);
   void setTime();
   void setupWifi();
+
+  
   bool connectWiFi();
   weatherData getWeatherData();
   weatherData getWeatherData(String cityID, String units, String lang,

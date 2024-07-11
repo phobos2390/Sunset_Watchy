@@ -2,9 +2,10 @@
 #define SUNSET_WATCHY_H
 
 #include <Watchy.h>
+#include <CliTerminal.h>
 
 #define POSITION_DENSITY 24
-#define DAYS_STEP_HISTORY 31
+#define DAYS_STEP_HISTORY 7
 
 struct ScreenPosition
 {
@@ -14,14 +15,11 @@ struct ScreenPosition
 
 class Sunset_watchface : public Watchy
 {
-    ScreenPosition m_hour_positions [POSITION_DENSITY];
-    uint16_t Steps_History [DAYS_STEP_HISTORY];
-    uint8_t Current_Day;
-    uint8_t Days_For_Average;
     using Watchy::Watchy;
     public:
         virtual void drawWatchFace();
         void initPositions();
+        void drawBigNumber(uint16_t bigNumber);
 };
 
 #endif /* SUNSET_WATCHY_H */
